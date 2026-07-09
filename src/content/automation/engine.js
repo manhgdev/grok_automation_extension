@@ -441,6 +441,43 @@ function awaitSleep(ms) {
   }
 }
 
+async function submitPromptOnce(editor, selectors) {
+  await waitForSelector(selectors.submitButton, 'Submit button', 5000);
+  const submitBtn = firstVisible(selectors.submitButton);
+  if (submitBtn) {
+    await nativeClick(submitBtn);
+    await waitForSubmitAck(selectors);
+    return;
+  }
+  editor.focus();
+  editor.dispatchEvent(new KeyboardEvent('keydown', {
+    bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, ctrlKey: true, metaKey: true,
+  }));
+  await waitForSubmitAck(selectors);
+}
+
+function isPromptEditorEmpty(selectors) {
+  const editor = firstVisible(selectors.promptContentEditable)
+    || firstVisible(selectors.promptDropUiTextarea)
+    || firstVisible(selectors.promptTextarea);
+  if (!editor) return false;
+  const text = 'value' in editor ? editor.value : editor.textContent;
+  return !String(text || '').trim();
+}
+
+async function waitForSubmitAck(selectors) {
+  const started = Date.now();
+  const timeoutMs = 5000;
+  while (Date.now() - started < timeoutMs) {
+    const submitBtn = firstVisible(selectors.submitButton);
+    if (submitBtn?.disabled) return;
+    if (isPromptEditorEmpty(selectors)) return;
+    if (getPercentageFromPage(selectors) != null) return;
+    if (firstVisible(selectors.generateVideoButton)) return;
+    await sleep(250);
+  }
+}
+
 async function fillPromptExecCommand(payload, selectors) {
   let promptSelector = selectors.promptContentEditable;
   if (jq(selectors.promptDropUiTextarea).length) {
@@ -489,14 +526,7 @@ async function fillPromptExecCommand(payload, selectors) {
 
   log('info', `Filled prompt: ${String(promptText).substring(0, 50)}...`);
 
-  await waitForSelector(selectors.submitButton, 'Submit button', 5000);
-  editor.focus();
-  editor.dispatchEvent(new KeyboardEvent('keydown', {
-    bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, ctrlKey: true, metaKey: true,
-  }));
-  editor.dispatchEvent(new KeyboardEvent('keydown', {
-    bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13,
-  }));
+  await submitPromptOnce(editor, selectors);
 
   return editor;
 }
@@ -747,7 +777,7 @@ async function selectVideoQualitySetting(payload) {
 }
 
 async function configureVideo(payload, selectors) {
-  const isContinuation = !!payload.outputPreviousPrompt;
+  const isContinuation = !!payload.outputPreviousPrompt || Number(payload.promptIndex) > 1;
 
   if (!isContinuation) {
     if (!isOnVideoPage()) await selectImagineModeTab('video', selectors);
@@ -843,6 +873,31 @@ function articleRoot(selectors) {
   return firstVisible(selectors.mainArticle) || document;
 }
 
+function collectVideoElements(root) {
+  return jq('video[src], video source[src]', root)
+    .toArray()
+    .map((el) => (el.tagName?.toLowerCase() === 'source' ? el.parentElement : el))
+    .filter(Boolean)
+    .filter((el) => {
+      const src = getMediaUrl(el);
+      return src && isVisible(el);
+    });
+}
+
+function snapshotVideoBaselineSrcs(selectors) {
+  return new Set(collectVideoElements(document).map((el) => getMediaUrl(el)).filter(Boolean));
+}
+
+function articleForMedia(media, selectors) {
+  const el = media?.[0];
+  if (!el) return lastMainArticle(selectors) || document;
+  const articles = jq(selectors.mainArticle).toArray().filter(isVisible);
+  for (const article of articles) {
+    if (article.contains(el)) return article;
+  }
+  return lastMainArticle(selectors) || document;
+}
+
 function getPercentageFromPage(selectors) {
   const button = firstVisible(selectors.generateVideoButton);
   if (button) {
@@ -871,21 +926,23 @@ function getPercentageFromPage(selectors) {
   return null;
 }
 
-async function waitForGeneration(payload, selectors, group) {
+async function waitForGeneration(payload, selectors, group, options = {}) {
   const wantsImage = payload.mode?.includes('ToImage');
   const goal = wantsImage ? Math.max(1, Number(payload.outputCount) || 1) : 1;
+  const baselineSrcs = options.videoBaselineSrcs || new Set();
+  const videoStableMs = 3000;
+  const videoStableCache = new Map();
   const started = Date.now();
   const timeoutMs = 15 * 60 * 1000;
-  // ponytail: reference không chờ stable 5–10s sau khi video/img đã có src — chỉ T2I (waitForTextToImageResources) giữ 10s
 
   while (Date.now() - started < timeoutMs) {
     if (group?.isCancelling) throw new Error('Cancelled');
     await waitWhilePaused(group);
 
-    const root = articleRoot(selectors);
     let media;
 
     if (wantsImage) {
+      const root = articleRoot(selectors);
       const selector =
         payload.mode === 'imageToImage' || payload.outputPreviousPrompt?.nextPromptEditImage
           ? `${selectors.imageToImageResultGrid || 'div.grid'} img`
@@ -903,14 +960,21 @@ async function waitForGeneration(payload, selectors, group) {
         });
       }
     } else {
-      media = jq('video[src], video source[src]', root)
-        .toArray()
-        .map((el) => (el.tagName?.toLowerCase() === 'source' ? el.parentElement : el))
-        .filter(Boolean)
-        .filter((el) => {
-          const src = el.currentSrc || el.src || el.getAttribute('src');
-          return src && isVisible(el);
-        });
+      const root = lastMainArticle(selectors) || document;
+      const now = Date.now();
+      const candidates = collectVideoElements(root).filter((el) => {
+        const src = getMediaUrl(el);
+        return src && !baselineSrcs.has(src);
+      });
+      media = candidates.filter((el) => {
+        const src = getMediaUrl(el);
+        const cached = videoStableCache.get(el);
+        if (!cached || cached.src !== src) {
+          videoStableCache.set(el, { src, firstSeen: now });
+          return false;
+        }
+        return now - cached.firstSeen >= videoStableMs;
+      });
     }
 
     if (media.length >= goal) {
@@ -941,8 +1005,9 @@ async function setDownloadFolder(payload, mediaCount) {
   });
 }
 
-async function clickNativeDownload(selectors, payload) {
-  await maybeClick(selectors.moreOptionsButton, 'More options', 5000, articleRoot(selectors));
+async function clickNativeDownload(selectors, root) {
+  const scope = root || lastMainArticle(selectors) || document;
+  await maybeClick(selectors.moreOptionsButton, 'More options', 5000, scope);
   const downloadBtn = await waitForSelector(selectors.downloadButton, 'Download button', 10000);
   await nativeClick(downloadBtn);
 }
@@ -1011,17 +1076,18 @@ function normalizeSelectors(configSelectors) {
   };
 }
 
-async function handleUpscale(selectors, payload) {
+async function handleUpscale(selectors, payload, root) {
   const quality = normalizeVideoQuality(payload.autoDownloadResourceQuality);
   if (quality !== '1080p' && !quality.includes('upscale')) return false;
 
-  const hdBtn = firstVisible(selectors.hdButton);
+  const scope = root || lastMainArticle(selectors) || document;
+  const hdBtn = firstVisible(selectors.hdButton, scope);
   if (hdBtn) {
     log('info', 'HD button already available, skipping upscale');
     return true;
   }
 
-  await maybeClick(selectors.moreOptionsButton, 'More options', 5000, articleRoot(selectors));
+  await maybeClick(selectors.moreOptionsButton, 'More options', 5000, scope);
   const upscaleItem = await maybeClick(selectors.upscaleMenuItem, 'Upscale menu item', 3000);
   if (!upscaleItem) return false;
 
@@ -1034,7 +1100,7 @@ async function handleUpscale(selectors, payload) {
 
   log('info', 'Upscale initiated, waiting for HD button...');
   for (let i = 0; i < 30; i++) {
-    if (firstVisible(selectors.hdButton)) {
+    if (firstVisible(selectors.hdButton, scope)) {
       log('info', 'Upscale complete (HD button found)');
       return true;
     }
@@ -1062,13 +1128,15 @@ async function downloadResult(media, payload, selectors) {
     return;
   }
 
-  await handleUpscale(selectors, payload);
+  const mediaArticle = articleForMedia(selected, selectors);
+  await handleUpscale(selectors, payload, mediaArticle);
 
   try {
-    await setDownloadFolder(payload, selected.length);
-    await clickNativeDownload(selectors, payload);
-  } catch {
     await downloadByUrl(selected, payload);
+  } catch (error) {
+    log('warn', 'URL download failed, falling back to native click', error);
+    await setDownloadFolder(payload, selected.length);
+    await clickNativeDownload(selectors, mediaArticle);
   }
 }
 
@@ -1276,6 +1344,8 @@ async function runPayload(payload, config, group) {
 
   if (group.isCancelling) throw new Error('Cancelled');
 
+  const videoBaselineSrcs = wantsVideo ? snapshotVideoBaselineSrcs(selectors) : null;
+
   steps[2].status = 'running';
   await fillPromptExecCommand(payload, selectors);
   steps[2].status = 'completed';
@@ -1284,7 +1354,7 @@ async function runPayload(payload, config, group) {
   if (group.isCancelling) throw new Error('Cancelled');
 
   steps[3].status = 'running';
-  const media = await waitForGeneration(payload, selectors, group);
+  const media = await waitForGeneration(payload, selectors, group, { videoBaselineSrcs });
   emitProgress(payload, 100, 'completed');
   steps[3].status = 'completed';
 

@@ -124,6 +124,13 @@ async function main() {
     failed = true;
   }
 
+  console.log('\n=== T2V batch helpers ===');
+  try {
+    execSync('node scripts/check-t2v-batch.cjs', { cwd: root, stdio: 'inherit' });
+  } catch {
+    failed = true;
+  }
+
   if (failed) {
     console.error('\n❌ Có lỗi — sửa src/ rồi: npm run build');
     process.exit(1);

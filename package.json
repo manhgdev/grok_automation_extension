@@ -1,6 +1,6 @@
 {
   "name": "grok-automation",
-  "version": "1.0.53",
+  "version": "1.0.56",
   "private": true,
   "type": "module",
   "description": "Grok Automation Chrome Extension",

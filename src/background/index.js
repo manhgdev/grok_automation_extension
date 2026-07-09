@@ -222,7 +222,18 @@ function persistUnusualTipPending(message) {
 
 let downloadFolder = '';
 let downloadPrefix = '';
+const downloadPrefixQueue = [];
 let autoRenameDownloads = true;
+
+function pushDownloadPrefix(prefix) {
+  const trimmed = String(prefix || '').trim();
+  downloadPrefix = trimmed;
+  if (trimmed) downloadPrefixQueue.push(trimmed);
+}
+
+function takeDownloadPrefix() {
+  return downloadPrefixQueue.length ? downloadPrefixQueue.shift() : downloadPrefix;
+}
 
 const pendingDownloadNames = new Map();
 const recentDownloadUrls = new Map();
@@ -321,8 +332,9 @@ function onDownloadDeterminingFilename(item, suggest) {
     });
   };
 
-  if (downloadPrefix) {
-    suggestFilename(`${downloadFolder}${downloadPrefix}${ext}`);
+  const prefix = takeDownloadPrefix();
+  if (prefix) {
+    suggestFilename(`${downloadFolder}${prefix}${ext}`);
     return;
   }
 
@@ -663,7 +675,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
 
       if (typeof prefix === 'string') {
-        downloadPrefix = prefix.trim();
+        pushDownloadPrefix(prefix);
       }
 
       if (typeof autoChangeFileName === 'boolean') {
