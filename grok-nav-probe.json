@@ -1,0 +1,14 @@
+{
+  "source": "probe-grok-live.mjs on logged-in Chrome profile copy",
+  "modeTabs": {
+    "container": "div[role=radiogroup]",
+    "control": "button[role=radio]",
+    "activeAttr": "aria-checked=true",
+    "labels": {
+      "image": "Hình ảnh",
+      "video": "Video",
+      "agent": "Agent"
+    },
+    "afterAgentClickUrl": "https://grok.com/imagine/agent"
+  }
+}

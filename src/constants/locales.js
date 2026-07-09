@@ -1,0 +1,23 @@
+/** Danh sách ngôn ngữ panel — label dùng i18n key settingsTab.language.* */
+export const LOCALE_OPTIONS = [
+  { value: 'en', labelKey: 'settingsTab.language.english' },
+  { value: 'vi', labelKey: 'settingsTab.language.vietnamese' },
+  { value: 'zh', labelKey: 'settingsTab.language.chinese' },
+  { value: 'ko', labelKey: 'settingsTab.language.korean' },
+  { value: 'es', labelKey: 'settingsTab.language.spanish' },
+  { value: 'ja', labelKey: 'settingsTab.language.japanese' },
+  { value: 'pt', labelKey: 'settingsTab.language.portuguese' },
+  { value: 'hi', labelKey: 'settingsTab.language.hindi' },
+  { value: 'ur', labelKey: 'settingsTab.language.urdu' },
+  { value: 'tr', labelKey: 'settingsTab.language.turkish' },
+  { value: 'ar', labelKey: 'settingsTab.language.arabic' },
+  { value: 'de', labelKey: 'settingsTab.language.german' },
+  { value: 'fr', labelKey: 'settingsTab.language.french' },
+  { value: 'id', labelKey: 'settingsTab.language.indonesian' },
+  { value: 'it', labelKey: 'settingsTab.language.italian' },
+  { value: 'ru', labelKey: 'settingsTab.language.russian' },
+  { value: 'nl', labelKey: 'settingsTab.language.dutch' },
+  { value: 'th', labelKey: 'settingsTab.language.thai' },
+  { value: 'bn', labelKey: 'settingsTab.language.bengali' },
+  { value: 'tl', labelKey: 'settingsTab.language.filipino' },
+];
